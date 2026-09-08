@@ -1,32 +1,32 @@
 from app.agents.conversation_memory import ConversationMemory
-from app.agents.router import IntentRouter, Route
-from app.rag.rag_service import RAGService
-from app.tools.incident_tool import IncidentStatusTool, ToolInvocation
+from app.agents.operations_graph import build_operations_graph
 
 
 class OperationsAgent:
     """
     Enterprise AI Operations Agent.
 
-    Agent v2:
-    - Routes knowledge questions to RAG.
-    - Routes live operational questions to tools.
-    - Executes the IncidentStatusTool for service-status questions.
-    - Stores conversation history by session.
-    - Direct LLM execution remains a future capability.
+    LangGraph is the orchestration layer responsible for:
+    - routing knowledge questions to RAG
+    - routing operational questions to tools
+    - routing general questions to the LLM
+
+    Conversation history is maintained by session_id.
     """
 
     def __init__(self):
-        self.router = IntentRouter()
-        self.rag_service = RAGService()
-        self.incident_tool = IncidentStatusTool()
         self.memory = ConversationMemory()
+        self.graph = build_operations_graph()
 
     def run(
         self,
         query: str,
         session_id: str = "default",
     ) -> dict:
+        """
+        Execute a user request through the LangGraph workflow.
+        """
+
         if not query.strip():
             raise ValueError("Query cannot be empty")
 
@@ -37,138 +37,41 @@ class OperationsAgent:
             query,
         )
 
-        route = self.router.route(query)
-
-        if route == Route.RAG:
-            result = self.rag_service.answer(query)
-
-            response = {
+        # Execute the LangGraph workflow.
+        result = self.graph.invoke(
+            {
+                "session_id": session_id,
                 "query": query,
-                "route": route.value,
-                "answer": result["answer"],
-                "sources": result["sources"],
-                "abstained": result["abstained"],
-                "grounded": result["grounded"],
             }
-
-            # Store the assistant response.
-            self.memory.add_message(
-                session_id,
-                "assistant",
-                response["answer"],
-            )
-
-            return response
-
-        if route == Route.TOOL:
-            response = self._run_tool(query)
-
-            # Store the assistant response.
-            self.memory.add_message(
-                session_id,
-                "assistant",
-                response["answer"],
-            )
-
-            return response
-
-        response = {
-            "query": query,
-            "route": route.value,
-            "answer": (
-                "This request can be handled directly by "
-                "the language model. Direct LLM execution "
-                "will be implemented in a later version."
-            ),
-            "sources": [],
-            "abstained": False,
-            "grounded": False,
-        }
+        )
 
         # Store the assistant response.
+        answer = result.get("answer", "")
+
         self.memory.add_message(
             session_id,
             "assistant",
-            response["answer"],
+            answer,
         )
 
-        return response
-
-    def _run_tool(self, query: str) -> dict:
-        """
-        Create a structured tool invocation and execute it.
-
-        Agent v2 represents the selected tool and its arguments
-        explicitly before execution.
-        """
-
-        service = self._extract_service(query)
-
-        invocation = ToolInvocation(
-            tool_name="incident_status",
-            arguments={
-                "service": service,
-            },
-        )
-
-        if invocation.tool_name != "incident_status":
-            raise ValueError(
-                f"Unsupported tool: {invocation.tool_name}"
-            )
-
-        result = self.incident_tool.get_status(
-            invocation.arguments["service"]
-        )
-
-        if result["status"] == "OPERATIONAL":
-            answer = (
-                f"The {result['service']} service is currently "
-                f"operational. {result['summary']}"
-            )
-        elif result["status"] == "DEGRADED":
-            answer = (
-                f"The {result['service']} service is currently "
-                f"degraded. Severity: {result['severity']}. "
-                f"{result['summary']}"
-            )
-        else:
-            answer = (
-                f"The current status of the {result['service']} "
-                f"service is unknown. {result['summary']}"
-            )
-
-        return {
+        # Return the public agent response.
+        response = {
             "query": query,
-            "route": Route.TOOL.value,
+            "route": result["route"].value,
             "answer": answer,
-            "sources": [],
-            "abstained": False,
-            "grounded": False,
-            "tool": invocation.tool_name,
-            "tool_arguments": invocation.arguments,
-            "tool_result": result,
+            "sources": result.get("sources", []),
+            "abstained": result.get("abstained", False),
+            "grounded": result.get("grounded", False),
         }
 
-    def _extract_service(self, query: str) -> str:
-        """
-        Extract the service name from the user's question.
+        # Include tool information when the tool branch was used.
+        if result.get("tool"):
+            response["tool"] = result["tool"]
 
-        Agent v2 supports a small deterministic service vocabulary.
-        A production implementation can replace this with structured
-        tool arguments generated by an LLM.
-        """
+        if result.get("tool_arguments"):
+            response["tool_arguments"] = result["tool_arguments"]
 
-        query_lower = query.lower()
+        if result.get("tool_result"):
+            response["tool_result"] = result["tool_result"]
 
-        if "payment" in query_lower:
-            return "payment"
-
-        if "customer" in query_lower:
-            return "customer"
-
-        if "booking" in query_lower:
-            return "booking"
-
-        raise ValueError(
-            "Could not determine the service from the request."
-        )
+        return response

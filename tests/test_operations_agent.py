@@ -48,13 +48,15 @@ def test_agent_executes_operational_service_tool():
     assert "operational" in result["answer"].lower()
 
 
-def test_agent_routes_direct_llm_question():
+def test_agent_routes_http_503_question_to_rag():
     agent = OperationsAgent()
 
-    result = agent.run("What is HTTP 503?")
+    result = agent.run(
+        "What is HTTP 503?"
+    )
 
-    assert result["route"] == "direct_llm"
-    assert "directly" in result["answer"]
+    assert result["route"] == "rag"
+    assert result["grounded"] is True
 
 
 def test_agent_rejects_empty_query():
