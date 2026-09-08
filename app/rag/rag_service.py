@@ -1,7 +1,8 @@
 from app.llm.ollama_client import OllamaClient
+from app.rag.grounding_validator import GroundingValidator
 from app.rag.prompt_builder import PromptBuilder
-from app.rag.retriever import Retriever
 from app.rag.relevance_filter import RelevanceFilter
+from app.rag.retriever import Retriever
 
 
 class RAGService:
@@ -16,25 +17,25 @@ class RAGService:
             ↓
         Qdrant
             ↓
-        Top-K Results
-            ↓
         Relevance Filter
-            ↓
-        Relevant Context
             ↓
         Prompt Builder
             ↓
         LLM
             ↓
-        Grounded Answer
-
-    If no retrieved result meets the relevance threshold,
-    the service abstains instead of calling the LLM.
+        Grounding Validator
+            ↓
+        Grounded Answer / Abstention
     """
 
     ABSTENTION_MESSAGE = (
         "I don't have enough relevant information in the "
         "knowledge base to answer this question."
+    )
+
+    GROUNDING_FAILURE_MESSAGE = (
+        "I generated an answer, but I could not verify that "
+        "the answer is fully supported by the knowledge base."
     )
 
     def __init__(
@@ -51,7 +52,10 @@ class RAGService:
         )
 
         self.prompt_builder = PromptBuilder()
+
         self.llm = OllamaClient()
+
+        self.grounding_validator = GroundingValidator()
 
     def answer(
         self,
@@ -59,11 +63,9 @@ class RAGService:
         top_k: int = 3,
     ) -> dict:
         """
-        Retrieve relevant context and generate
-        a grounded answer.
-
-        The LLM is only called when at least one
-        retrieved chunk passes the relevance threshold.
+        Retrieve relevant context, generate an answer,
+        and validate that the answer is grounded in the
+        retrieved evidence.
         """
 
         if not query.strip():
@@ -80,12 +82,13 @@ class RAGService:
             retrieved_chunks
         )
 
-        # Step 3: Abstain if nothing is relevant enough
+        # Step 3: Abstain when there is insufficient evidence
         if not relevant_chunks:
             return {
                 "answer": self.ABSTENTION_MESSAGE,
                 "sources": [],
                 "abstained": True,
+                "grounded": False,
             }
 
         # Step 4: Build grounded prompt
@@ -100,7 +103,23 @@ class RAGService:
             temperature=0.2,
         )
 
-        # Step 6: Return answer and supporting sources
+        # Step 6: Validate generated answer
+        grounding_result = self.grounding_validator.validate(
+            answer=answer,
+            retrieved_chunks=relevant_chunks,
+        )
+
+        # Step 7: Reject unsupported answer
+        if not grounding_result["grounded"]:
+            return {
+                "answer": self.GROUNDING_FAILURE_MESSAGE,
+                "sources": [],
+                "abstained": True,
+                "grounded": False,
+                "grounding_reason": grounding_result["reason"],
+            }
+
+        # Step 8: Return validated answer and sources
         sources = [
             {
                 "source": chunk["source"],
@@ -114,4 +133,6 @@ class RAGService:
             "answer": answer,
             "sources": sources,
             "abstained": False,
+            "grounded": True,
+            "grounding_reason": grounding_result["reason"],
         }
