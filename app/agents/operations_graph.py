@@ -63,15 +63,31 @@ def _extract_service(query: str) -> str:
 
 
 def rag_node(state: AgentState) -> AgentState:
-    """
-    Execute the existing RAGService through LangGraph.
-    """
     query = state.get("query", "").strip()
-
     if not query:
         raise ValueError("Query cannot be empty")
 
-    result = rag_service.answer(query)
+    conversation_history = state.get(
+        "conversation_history",
+        [],
+    )
+
+    conversation_context = "\n".join(
+        f"{message['role'].capitalize()}: {message['content']}"
+        for message in conversation_history
+    )
+
+    if conversation_context:
+        contextual_query = (
+            "Conversation history:\n"
+            f"{conversation_context}\n\n"
+            "Current user question:\n"
+            f"{query}"
+        )
+    else:
+        contextual_query = query
+
+    result = rag_service.answer(contextual_query)
 
     return {
         **state,

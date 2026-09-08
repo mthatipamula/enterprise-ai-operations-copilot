@@ -1,4 +1,6 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+
+from app.agents.conversation_repository import ConversationRepository
 
 
 @dataclass
@@ -9,15 +11,14 @@ class ConversationMessage:
 
 class ConversationMemory:
     """
-    In-memory conversation state for the Operations Agent.
+    Persistent conversation memory for the Operations Agent.
 
-    This implementation is intentionally simple for the POC.
-    A production implementation can use Redis or another
-    persistent/session-oriented store.
+    Conversation messages are stored in PostgreSQL through
+    the ConversationRepository.
     """
 
     def __init__(self):
-        self._sessions: dict[str, list[ConversationMessage]] = {}
+        self.repository = ConversationRepository()
 
     def add_message(
         self,
@@ -31,14 +32,10 @@ class ConversationMemory:
         if not content.strip():
             raise ValueError("Message content cannot be empty")
 
-        if session_id not in self._sessions:
-            self._sessions[session_id] = []
-
-        self._sessions[session_id].append(
-            ConversationMessage(
-                role=role,
-                content=content,
-            )
+        self.repository.save_message(
+            session_id=session_id,
+            role=role,
+            content=content,
         )
 
     def get_messages(
@@ -48,10 +45,18 @@ class ConversationMemory:
         if not session_id.strip():
             raise ValueError("Session ID cannot be empty")
 
-        return self._sessions.get(session_id, []).copy()
+        messages = self.repository.get_messages(session_id)
+
+        return [
+            ConversationMessage(
+                role=message.role,
+                content=message.content,
+            )
+            for message in messages
+        ]
 
     def clear_session(self, session_id: str) -> None:
         if not session_id.strip():
             raise ValueError("Session ID cannot be empty")
 
-        self._sessions.pop(session_id, None)
+        self.repository.clear_session(session_id)

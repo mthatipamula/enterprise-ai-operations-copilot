@@ -8,5 +8,18 @@ services:
     volumes:
       - qdrant_storage:/qdrant/storage
 
+  postgres:
+    image: postgres:16
+    container_name: enterprise-ai-postgres
+    environment:
+      POSTGRES_DB: enterprise_ai
+      POSTGRES_USER: enterprise_ai
+      POSTGRES_PASSWORD: enterprise_ai
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_storage:/var/lib/postgresql/data
+
 volumes:
   qdrant_storage:
+  postgres_storage:
