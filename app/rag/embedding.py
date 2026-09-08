@@ -49,4 +49,4 @@ class EmbeddingService:
         Return the dimensionality of the embedding vector.
         """
 
-        return self.model.get_sentence_embedding_dimension()
+        return self.model.get_embedding_dimension()
