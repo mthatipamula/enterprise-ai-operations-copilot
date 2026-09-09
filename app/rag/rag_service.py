@@ -1,8 +1,11 @@
+from torch import chunk
+
 from app.llm.ollama_client import OllamaClient
 from app.rag.grounding_validator import GroundingValidator
 from app.rag.prompt_builder import PromptBuilder
 from app.rag.relevance_filter import RelevanceFilter
 from app.rag.retriever import Retriever
+from app.core.document_guardrails import DocumentGuardrails
 
 
 class RAGService:
@@ -57,6 +60,8 @@ class RAGService:
 
         self.grounding_validator = GroundingValidator()
 
+        self.document_guardrails = DocumentGuardrails()
+
     def answer(
         self,
         query: str,
@@ -71,11 +76,21 @@ class RAGService:
         if not query.strip():
             raise ValueError("Query cannot be empty")
 
+        safe_chunks = []
+
         # Step 1: Retrieve candidate documents
         retrieved_chunks = self.retriever.retrieve(
             query=query,
             top_k=top_k,
         )
+
+        for chunk in retrieved_chunks:
+            content = chunk.get("content", "")
+
+            if self.document_guardrails.is_safe(content):
+                safe_chunks.append(chunk)
+
+        retrieved_chunks = safe_chunks
 
         # Step 2: Filter weakly relevant documents
         relevant_chunks = self.relevance_filter.filter(
