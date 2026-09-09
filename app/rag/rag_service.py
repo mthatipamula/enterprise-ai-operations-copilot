@@ -4,7 +4,7 @@ from app.llm.ollama_client import OllamaClient
 from app.rag.grounding_validator import GroundingValidator
 from app.rag.prompt_builder import PromptBuilder
 from app.rag.relevance_filter import RelevanceFilter
-from app.rag.retriever import Retriever
+from app.rag.hybrid_retriever import HybridRetriever
 from app.core.document_guardrails import DocumentGuardrails
 
 
@@ -46,8 +46,12 @@ class RAGService:
         collection_name: str = "enterprise_operations",
         relevance_threshold: float = 0.35,
     ):
-        self.retriever = Retriever(
-            collection_name=collection_name
+
+        self.retriever = HybridRetriever(
+            collection_name=collection_name,
+            dense_top_k=10,
+            bm25_top_k=10,
+            fusion_top_k=20,
         )
 
         self.relevance_filter = RelevanceFilter(
@@ -65,7 +69,7 @@ class RAGService:
     def answer(
         self,
         query: str,
-        top_k: int = 3,
+        top_k: int = 5,
     ) -> dict:
         """
         Retrieve relevant context, generate an answer,

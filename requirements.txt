@@ -64,3 +64,4 @@ uvicorn==0.52.4
 langgraph
 sqlalchemy
 psycopg[binary]
+rank-bm25
