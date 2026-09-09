@@ -3,7 +3,7 @@ from qdrant_client.models import Distance, VectorParams, PointStruct
 
 from app.rag.document_loader import DocumentChunk
 from app.rag.embedding import EmbeddingService
-
+import os
 
 class QdrantVectorStore:
     """
@@ -14,10 +14,14 @@ class QdrantVectorStore:
     def __init__(
         self,
         collection_name: str = "enterprise_operations",
-        host: str = "localhost",
-        port: int = 6333,
+        host: str | None = None,
+        port: int | None = None,
     ):
         self.collection_name = collection_name
+
+        host = host or os.getenv("QDRANT_HOST", "localhost")
+        port = port or int(os.getenv("QDRANT_PORT", "6333"))
+
 
         self.client = QdrantClient(
             host=host,
