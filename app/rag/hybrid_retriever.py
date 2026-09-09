@@ -2,6 +2,7 @@ from app.rag.bm25_retriever import BM25Retriever
 from app.rag.rrf import RRFFusion
 from app.rag.retriever import Retriever
 from app.rag.document_loader import load_and_chunk_documents
+from app.rag.reranker import Reranker
 
 
 class HybridRetriever:
@@ -46,6 +47,7 @@ class HybridRetriever:
 
         # Reciprocal Rank Fusion.
         self.rrf = RRFFusion()
+        self.reranker = Reranker()
 
     def retrieve(
         self,
@@ -77,16 +79,19 @@ class HybridRetriever:
             top_k=self.fusion_top_k,
         )
 
-        # Keep the dense semantic score available for the
-        # existing relevance filter.
-        #
-        # A candidate that was returned only by BM25 does not
-        # have a meaningful semantic similarity score, so it
-        # should not bypass the semantic relevance gate.
+        # Keep only candidates that also have a dense semantic
+        # score so the existing relevance gate remains meaningful.
         fused_results = [
             result
             for result in fused_results
             if "score" in result
         ]
 
-        return fused_results[:top_k]
+        # Rerank the RRF candidate set using a cross-encoder.
+        reranked_results = self.reranker.rerank(
+            query=query,
+            chunks=fused_results,
+            top_k=top_k,
+        )
+
+        return reranked_results
