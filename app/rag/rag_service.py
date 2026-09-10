@@ -1,5 +1,7 @@
 from torch import chunk
 
+from opentelemetry import trace
+
 from app.llm.ollama_client import OllamaClient
 from app.rag.grounding_validator import GroundingValidator
 from app.rag.prompt_builder import PromptBuilder
@@ -7,6 +9,7 @@ from app.rag.relevance_filter import RelevanceFilter
 from app.rag.hybrid_retriever import HybridRetriever
 from app.core.document_guardrails import DocumentGuardrails
 
+tracer = trace.get_tracer(__name__)
 
 class RAGService:
     """
@@ -77,81 +80,130 @@ class RAGService:
         retrieved evidence.
         """
 
-        if not query.strip():
-            raise ValueError("Query cannot be empty")
+        with tracer.start_as_current_span("RAGService.answer") as span:
+            span.set_attribute("rag.query_length", len(query))
+            span.set_attribute("rag.top_k", top_k)
 
-        safe_chunks = []
+            if not query.strip():
+                span.set_attribute("rag.success", False)
+                raise ValueError("Query cannot be empty")
 
-        # Step 1: Retrieve candidate documents
-        retrieved_chunks = self.retriever.retrieve(
-            query=query,
-            top_k=top_k,
-        )
+            safe_chunks = []
 
-        for chunk in retrieved_chunks:
-            content = chunk.get("content", "")
+            # Step 1: Retrieve candidate documents
+            retrieved_chunks = self.retriever.retrieve(
+                query=query,
+                top_k=top_k,
+            )
 
-            if self.document_guardrails.is_safe(content):
-                safe_chunks.append(chunk)
+            span.set_attribute(
+                "rag.retrieved_documents",
+                len(retrieved_chunks),
+            )
 
-        retrieved_chunks = safe_chunks
+            span.set_attribute(
+                "evaluation.retrieval_count",
+                len(retrieved_chunks),
+            )
 
-        # Step 2: Filter weakly relevant documents
-        relevant_chunks = self.relevance_filter.filter(
-            retrieved_chunks
-        )
 
-        # Step 3: Abstain when there is insufficient evidence
-        if not relevant_chunks:
+            for chunk in retrieved_chunks:
+                content = chunk.get("content", "")
+
+                if self.document_guardrails.is_safe(content):
+                    safe_chunks.append(chunk)
+
+            retrieved_chunks = safe_chunks
+
+            span.set_attribute(
+                "rag.safe_documents",
+                len(retrieved_chunks),
+            )
+
+            # Step 2: Filter weakly relevant documents
+            relevant_chunks = self.relevance_filter.filter(
+                retrieved_chunks
+            )
+
+            span.set_attribute(
+                "rag.relevant_documents",
+                len(relevant_chunks),
+            )
+
+            span.set_attribute(
+                "evaluation.relevant_count",
+                len(relevant_chunks),
+            )
+
+            # Step 3: Abstain when there is insufficient evidence
+            if not relevant_chunks:
+                span.set_attribute("rag.abstained", True)
+                span.set_attribute("rag.grounded", False)
+                span.set_attribute("evaluation.abstained", True)
+                span.set_attribute("evaluation.grounded", False)
+                span.set_attribute("rag.success", True)
+
+                return {
+                    "answer": self.ABSTENTION_MESSAGE,
+                    "sources": [],
+                    "abstained": True,
+                    "grounded": False,
+                }
+
+            # Step 4: Build grounded prompt
+            prompt = self.prompt_builder.build(
+                query=query,
+                retrieved_chunks=relevant_chunks,
+            )
+
+            # Step 5: Generate answer
+            answer = self.llm.generate(
+                prompt=prompt,
+                temperature=0.2,
+            )
+
+            # Step 6: Validate generated answer
+            grounding_result = self.grounding_validator.validate(
+                answer=answer,
+                retrieved_chunks=relevant_chunks,
+            )
+
+            # Step 7: Reject unsupported answer
+            if not grounding_result["grounded"]:
+                span.set_attribute("rag.abstained", True)
+                span.set_attribute("rag.grounded", False)
+                span.set_attribute("evaluation.abstained", True)
+                span.set_attribute("evaluation.grounded", False)
+                span.set_attribute("rag.success", True)
+
+                return {
+                    "answer": self.GROUNDING_FAILURE_MESSAGE,
+                    "sources": [],
+                    "abstained": True,
+                    "grounded": False,
+                    "grounding_reason": grounding_result["reason"],
+                }
+
+            # Step 8: Return validated answer and sources
+            sources = [
+                {
+                    "source": chunk["source"],
+                    "chunk_id": chunk["chunk_id"],
+                    "score": chunk["score"],
+                }
+                for chunk in relevant_chunks
+            ]
+
+            span.set_attribute("rag.abstained", False)
+            span.set_attribute("rag.grounded", True)
+            span.set_attribute("evaluation.abstained", False)
+            span.set_attribute("evaluation.grounded", True)
+            span.set_attribute("rag.success", True)
+
             return {
-                "answer": self.ABSTENTION_MESSAGE,
-                "sources": [],
-                "abstained": True,
-                "grounded": False,
-            }
-
-        # Step 4: Build grounded prompt
-        prompt = self.prompt_builder.build(
-            query=query,
-            retrieved_chunks=relevant_chunks,
-        )
-
-        # Step 5: Generate answer
-        answer = self.llm.generate(
-            prompt=prompt,
-            temperature=0.2,
-        )
-
-        # Step 6: Validate generated answer
-        grounding_result = self.grounding_validator.validate(
-            answer=answer,
-            retrieved_chunks=relevant_chunks,
-        )
-
-        # Step 7: Reject unsupported answer
-        if not grounding_result["grounded"]:
-            return {
-                "answer": self.GROUNDING_FAILURE_MESSAGE,
-                "sources": [],
-                "abstained": True,
-                "grounded": False,
+                "answer": answer,
+                "sources": sources,
+                "abstained": False,
+                "grounded": True,
                 "grounding_reason": grounding_result["reason"],
             }
-
-        # Step 8: Return validated answer and sources
-        sources = [
-            {
-                "source": chunk["source"],
-                "chunk_id": chunk["chunk_id"],
-                "score": chunk["score"],
-            }
-            for chunk in relevant_chunks
-        ]
-
-        return {
-            "answer": answer,
-            "sources": sources,
-            "abstained": False,
-            "grounded": True,
-            "grounding_reason": grounding_result["reason"],
-        }

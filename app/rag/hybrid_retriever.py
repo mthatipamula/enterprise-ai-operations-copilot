@@ -1,9 +1,13 @@
+
+from opentelemetry import trace
+
 from app.rag.bm25_retriever import BM25Retriever
 from app.rag.rrf import RRFFusion
 from app.rag.retriever import Retriever
 from app.rag.document_loader import load_and_chunk_documents
 from app.rag.reranker import Reranker
 
+tracer = trace.get_tracer(__name__)
 
 class HybridRetriever:
     """
@@ -59,39 +63,76 @@ class HybridRetriever:
         then combine the results using RRF.
         """
 
-        if not query or not query.strip():
-            raise ValueError("Query cannot be empty")
+        with tracer.start_as_current_span("HybridRetriever.retrieve") as span:
+            span.set_attribute("retrieval.top_k", top_k)
+            span.set_attribute("retrieval.dense_top_k", self.dense_top_k)
+            span.set_attribute("retrieval.bm25_top_k", self.bm25_top_k)
+            span.set_attribute("retrieval.fusion_top_k", self.fusion_top_k)
 
-        dense_results = self.dense_retriever.retrieve(
-            query=query,
-            top_k=self.dense_top_k,
-        )
+            if not query or not query.strip():
+                span.set_attribute("retrieval.success", False)
+                raise ValueError("Query cannot be empty")
 
-        bm25_results = self.bm25_retriever.search(
-            query=query,
-        )
+            # Dense semantic retrieval from Qdrant
+            dense_results = self.dense_retriever.retrieve(
+                query=query,
+                top_k=self.dense_top_k,
+            )
 
-        fused_results = self.rrf.fuse(
-            result_lists=[
-                dense_results,
-                bm25_results,
-            ],
-            top_k=self.fusion_top_k,
-        )
+            span.set_attribute(
+                "retrieval.dense_results",
+                len(dense_results),
+            )
 
-        # Keep only candidates that also have a dense semantic
-        # score so the existing relevance gate remains meaningful.
-        fused_results = [
-            result
-            for result in fused_results
-            if "score" in result
-        ]
+            # Lexical retrieval using BM25
+            bm25_results = self.bm25_retriever.search(
+                query=query,
+            )
 
-        # Rerank the RRF candidate set using a cross-encoder.
-        reranked_results = self.reranker.rerank(
-            query=query,
-            chunks=fused_results,
-            top_k=top_k,
-        )
+            span.set_attribute(
+                "retrieval.bm25_results",
+                len(bm25_results),
+            )
 
-        return reranked_results
+            # Reciprocal Rank Fusion
+            fused_results = self.rrf.fuse(
+                result_lists=[
+                    dense_results,
+                    bm25_results,
+                ],
+                top_k=self.fusion_top_k,
+            )
+
+            span.set_attribute(
+                "retrieval.fused_results",
+                len(fused_results),
+            )
+
+            # Keep only candidates that also have a dense semantic
+            # score so the existing relevance gate remains meaningful.
+            fused_results = [
+                result
+                for result in fused_results
+                if "score" in result
+            ]
+
+            span.set_attribute(
+                "retrieval.semantic_candidates",
+                len(fused_results),
+            )
+
+            # Cross-encoder reranking
+            reranked_results = self.reranker.rerank(
+                query=query,
+                chunks=fused_results,
+                top_k=top_k,
+            )
+
+            span.set_attribute(
+                "retrieval.reranked_results",
+                len(reranked_results),
+            )
+
+            span.set_attribute("retrieval.success", True)
+
+            return reranked_results
