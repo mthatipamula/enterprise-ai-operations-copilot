@@ -5,6 +5,7 @@ class AgentState(TypedDict, total=False):
     session_id: str
     query: str
     route: str
+    user_context: dict
 
     # Conversation history loaded from PostgreSQL.
     conversation_history: list[dict[str, str]]

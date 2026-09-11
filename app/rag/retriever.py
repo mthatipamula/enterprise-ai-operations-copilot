@@ -19,6 +19,8 @@ class Retriever:
         self,
         query: str,
         top_k: int = 3,
+        department: str | None = None,
+        roles: list[str] | None = None,
     ) -> list[dict]:
         """
         Retrieve the top-k semantically similar chunks.
@@ -30,4 +32,6 @@ class Retriever:
         return self.vector_store.search(
             query=query,
             limit=top_k,
+            department=department,
+            roles=roles,
         )

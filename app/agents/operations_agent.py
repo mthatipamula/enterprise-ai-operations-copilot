@@ -18,7 +18,12 @@ class OperationsAgent:
         self.pii_guardrails = PIIGuardrails()
         self.output_guardrails = OutputGuardrails()
 
-    def run(self, query: str, session_id: str = "default") -> dict:
+    def run(
+        self,
+        query: str,
+        session_id: str = "default",
+        user_context: dict | None = None,
+    ):
         with tracer.start_as_current_span("OperationsAgent.run") as span:
             span.set_attribute("agent.name", "OperationsAgent")
             span.set_attribute("session.id", session_id)
@@ -49,9 +54,9 @@ class OperationsAgent:
 
             result = self.graph.invoke(
                 {
+                    "query": query,
                     "session_id": session_id,
-                    "query": sanitized_query,
-                    "conversation_history": conversation_history,
+                    "user_context": user_context or {},
                 }
             )
 

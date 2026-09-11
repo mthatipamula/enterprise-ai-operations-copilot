@@ -1,4 +1,6 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from app.core.security import get_current_user
 from pydantic import BaseModel, Field
 
 from app.agents.operations_agent import OperationsAgent
@@ -29,7 +31,10 @@ class AgentRequest(BaseModel):
 
 
 @router.post("/chat")
-def chat(request: AgentRequest):
+def chat(
+    request: AgentRequest,
+    current_user: dict = Depends(get_current_user),
+):
     """
     Execute a request through the Operations Agent.
 
@@ -42,6 +47,7 @@ def chat(request: AgentRequest):
         return agent.run(
             query=request.query,
             session_id=request.session_id,
+            user_context=current_user,
         )
 
     except ValueError as exc:

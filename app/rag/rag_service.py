@@ -73,6 +73,8 @@ class RAGService:
         self,
         query: str,
         top_k: int = 5,
+        department: str | None = None,
+        roles: list[str] | None = None,
     ) -> dict:
         """
         Retrieve relevant context, generate an answer,
@@ -94,6 +96,8 @@ class RAGService:
             retrieved_chunks = self.retriever.retrieve(
                 query=query,
                 top_k=top_k,
+                department=department,
+                roles=roles,
             )
 
             span.set_attribute(

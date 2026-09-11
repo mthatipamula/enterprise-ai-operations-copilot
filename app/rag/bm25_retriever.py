@@ -29,7 +29,12 @@ class BM25Retriever:
 
         self.bm25 = BM25Okapi(tokenized_corpus)
 
-    def search(self, query: str) -> list[dict]:
+    def search(
+        self,
+        query: str,
+        department: str | None = None,
+        roles: list[str] | None = None,
+    ) -> list[dict]:
         """
         Search the indexed chunks using BM25.
         """
@@ -41,8 +46,35 @@ class BM25Retriever:
 
         scores = self.bm25.get_scores(tokenized_query)
 
+        authorized_indexes = []
+
+        for index, chunk in enumerate(self.chunks):
+            # No authorization context means standalone BM25 search.
+            if department is None and not roles:
+                authorized_indexes.append(index)
+                continue
+
+            chunk_department = chunk.get("department")
+            allowed_roles = chunk.get("allowed_roles", [])
+
+            # Admin users can access all documents.
+            if "admin" in (roles or []):
+                authorized_indexes.append(index)
+                continue
+
+            # Non-admin users must match both department and role.
+            if (
+                department
+                and chunk_department == department
+                and any(role in allowed_roles for role in (roles or []))
+            ):
+                authorized_indexes.append(index)
+
         ranked_results = sorted(
-            enumerate(scores),
+            (
+                (index, scores[index])
+                for index in authorized_indexes
+            ),
             key=lambda item: item[1],
             reverse=True,
         )

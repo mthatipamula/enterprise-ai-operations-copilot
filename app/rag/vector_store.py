@@ -82,6 +82,8 @@ class QdrantVectorStore:
                         "chunk_id": chunk.chunk_id,
                         "source": chunk.source,
                         "content": chunk.content,
+                        "department": "payments",
+                        "allowed_roles": ["operations", "admin"],
                     },
                 )
             )
@@ -92,19 +94,43 @@ class QdrantVectorStore:
         )
 
     def search(
-        self,
-        query: str,
-        limit: int = 3,
-    ) -> list[dict]:
+    self,
+    query: str,
+    limit: int = 3,
+    department: str | None = None,
+    roles: list[str] | None = None,
+) -> list[dict]:
         """
         Perform semantic similarity search against Qdrant.
+
+        When department and roles are provided, only documents
+        authorized for the user are returned.
         """
 
         query_embedding = self.embedding_service.embed_text(query)
 
+        query_filter = None
+
+        if department and roles:
+            from qdrant_client.models import Filter, FieldCondition, MatchValue
+
+            query_filter = Filter(
+                must=[
+                    FieldCondition(
+                        key="department",
+                        match=MatchValue(value=department),
+                    ),
+                    FieldCondition(
+                        key="allowed_roles",
+                        match=MatchValue(value=roles[0]),
+                    ),
+                ]
+            )
+
         results = self.client.query_points(
             collection_name=self.collection_name,
             query=query_embedding,
+            query_filter=query_filter,
             limit=limit,
         ).points
 

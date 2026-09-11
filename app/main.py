@@ -8,7 +8,8 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from app.api.agent import router as agent_router
 from app.api.search import router as search_router
-
+from app.api.auth import router as auth_router
+from app.api.admin import router as admin_router
 
 # Configure OpenTelemetry tracing.
 resource = Resource.create(
@@ -39,6 +40,8 @@ app = FastAPI(
 
 app.include_router(search_router)
 app.include_router(agent_router)
+app.include_router(auth_router)
+app.include_router(admin_router)
 
 FastAPIInstrumentor.instrument_app(app)
 

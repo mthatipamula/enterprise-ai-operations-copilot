@@ -44,6 +44,7 @@ class HybridRetriever:
         ]
 
         # Lexical retriever.
+        # Lexical retriever.
         self.bm25_retriever = BM25Retriever(
             chunks=bm25_chunks,
             top_k=bm25_top_k,
@@ -57,6 +58,8 @@ class HybridRetriever:
         self,
         query: str,
         top_k: int = 5,
+        department: str | None = None,
+        roles: list[str] | None = None,
     ) -> list[dict]:
         """
         Retrieve documents using both dense and BM25 retrieval,
@@ -77,6 +80,8 @@ class HybridRetriever:
             dense_results = self.dense_retriever.retrieve(
                 query=query,
                 top_k=self.dense_top_k,
+                department=department,
+                roles=roles,
             )
 
             span.set_attribute(

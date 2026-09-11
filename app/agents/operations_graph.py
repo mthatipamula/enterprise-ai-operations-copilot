@@ -82,7 +82,16 @@ def rag_node(state: AgentState) -> AgentState:
     else:
         contextual_query = query
 
-    result = rag_service.answer(contextual_query)
+        user_context = state.get("user_context", {})
+
+        department = user_context.get("department")
+        roles = user_context.get("roles", [])
+
+        result = rag_service.answer(
+            contextual_query,
+            department=department,
+            roles=roles,
+        )
 
     return {
         **state,
