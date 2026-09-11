@@ -3,13 +3,13 @@ from langgraph.graph import END, START, StateGraph
 from app.agents.router import IntentRouter, Route
 from app.agents.state import AgentState
 from app.rag.rag_service import RAGService
-from app.tools.incident_tool import IncidentStatusTool
+from app.mcp.client import MCPClient
 from app.llm.ollama_client import OllamaClient
 
 
 router = IntentRouter()
 rag_service = RAGService()
-incident_tool = IncidentStatusTool()
+mcp_client = MCPClient()
 llm_client = OllamaClient()
 
 
@@ -36,30 +36,25 @@ def route_request(state: AgentState) -> AgentState:
 
         updated_state["tool"] = "incident_status"
         updated_state["tool_arguments"] = {
-            "service": service,
+            "service": service
         }
 
     return updated_state
 
 
 def _extract_service(query: str) -> str:
-    """
-    Extract the service name from an operational query.
-    """
     query_lower = query.lower()
 
     if "payment" in query_lower:
         return "payment"
 
-    if "customer" in query_lower:
+    if "customer" in query_lower or "notification" in query_lower:
         return "customer"
 
-    if "booking" in query_lower:
+    if "booking" in query_lower or "reservation" in query_lower:
         return "booking"
 
-    raise ValueError(
-        "Could not determine the service from the request."
-    )
+    return ""
 
 
 def rag_node(state: AgentState) -> AgentState:
@@ -100,51 +95,37 @@ def rag_node(state: AgentState) -> AgentState:
 
 
 def tool_node(state: AgentState) -> AgentState:
-    """
-    Execute the existing IncidentStatusTool through LangGraph.
-    """
     tool_arguments = state.get("tool_arguments", {})
 
     service = tool_arguments.get("service", "").strip()
 
-    if not service:
-        raise ValueError("Service cannot be empty")
+    mcp_service_name = {
+        "payment": "payment-api",
+        "customer": "customer-notification-service",
+        "booking": "reservation-api",
+    }.get(service)
 
-    tool_result = incident_tool.get_status(service)
+    if not mcp_service_name:
+        raise ValueError(f"Unsupported service: {service}")
 
-    status = tool_result.get("status", "UNKNOWN")
-    severity = tool_result.get("severity")
-    summary = tool_result.get("summary", "")
-
-    if status == "OPERATIONAL":
-        answer = (
-            f"The {service} service is currently operational. "
-            f"{summary}"
-        )
-
-    elif status == "DEGRADED":
-        severity_text = (
-            f" Severity: {severity}."
-            if severity
-            else ""
-        )
-
-        answer = (
-            f"The {service} service is currently degraded."
-            f"{severity_text} {summary}"
-        )
-
-    else:
-        answer = (
-            f"The current status of the {service} service is unknown. "
-            f"{summary}"
-        )
+    tool_result = mcp_client.call_tool(
+        "get_service_health",
+        {
+            "service_name": mcp_service_name,
+        },
+    )
 
     return {
         **state,
         "tool": "incident_status",
+        "tool_arguments": {
+            "service_name": service,
+        },
         "tool_result": tool_result,
-        "answer": answer,
+        "answer": (
+            f"Service: {service}\n"
+            f"Status: {tool_result}"
+        ),
     }
 
 
